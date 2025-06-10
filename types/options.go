@@ -269,6 +269,10 @@ type StoreOptions struct {
 	DisableVolatile bool `json:"disable-volatile,omitempty"`
 	// If transient, don't persist containers over boot (stores db in runroot)
 	TransientStore bool `json:"transient_store,omitempty"`
+	// DigestType specifies the hash algorithm to use for content addressing.
+	// Supported values are: "sha256", "sha512", "crc64", "size"
+	// Default is "sha256"
+	DigestType string `json:"digest_type,omitempty"`
 }
 
 // isRootlessDriver returns true if the given storage driver is valid for containers running as non root

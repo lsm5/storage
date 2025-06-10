@@ -217,6 +217,9 @@ func TestIsContainerized(t *testing.T) {
 }
 
 func TestOsReleaseFallback(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("Skipping test when running as root")
+	}
 	backup := etcOsRelease
 	altBackup := altOsRelease
 	dir := os.TempDir()

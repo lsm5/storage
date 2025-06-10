@@ -201,6 +201,7 @@ type Store interface {
 	PullOptions() map[string]string
 	UIDMap() []idtools.IDMap
 	GIDMap() []idtools.IDMap
+	GetDigestType() string
 
 	// GraphDriver obtains and returns a handle to the graph Driver object used
 	// by the Store.
@@ -464,7 +465,7 @@ type Store interface {
 	ImageRunDirectory(id string) (string, error)
 
 	// ListLayerBigData retrieves a list of the (possibly large) chunks of
-	// named data associated with a layer.
+	// named data associated with an layer.
 	ListLayerBigData(id string) ([]string, error)
 
 	// LayerBigData retrieves a (possibly large) chunk of named data
@@ -656,7 +657,7 @@ type LayerOptions struct {
 	// not the tarstream.
 	// Use nil if not applicable or not known.
 	OriginalSize *int64
-	// UncompressedDigest specifies a digest of the uncompressed version (“DiffID”)
+	// UncompressedDigest specifies a digest of the uncompressed version ("DiffID")
 	// of the tarstream (diff), if one is provided along with these LayerOptions,
 	// and reliably known by the caller.
 	// Use the default "" if this fields is not applicable or the value is not known.
@@ -751,7 +752,7 @@ type store struct {
 	//   because (??) the Shutdown may forcibly unmount and clean up, affecting graph driver state in a way only a graph driver
 	//   and layer store reinitialization can notice.
 	// - Ensures that store.Shutdown is exclusive with mount operations. This is necessary at because some
-	//   graph drivers call mount.MakePrivate() during initialization, the mount operations require that, and the driver’s Cleanup() method
+	//   graph drivers call mount.MakePrivate() during initialization, the mount operations require that, and the driver's Cleanup() method
 	//   may undo that. So, holding graphLock is required throughout the duration of Shutdown(), and the duration of any mount
 	//   (but not unmount) calls.
 	// - Within this store object, protects access to some related in-memory state.
@@ -773,6 +774,7 @@ type store struct {
 	digestLockRoot  string
 	disableVolatile bool
 	transientStore  bool
+	digestType      string
 
 	// The following fields can only be accessed with graphLock held.
 	graphLockLastWrite lockfile.LastWrite
@@ -782,7 +784,7 @@ type store struct {
 	layerStoreUseGetters    rwLayerStore   // Almost all users should use the provided accessors instead of accessing this field directly.
 	roLayerStoresUseGetters []roLayerStore // Almost all users should use the provided accessors instead of accessing this field directly.
 
-	// FIXME: The following fields need locking, and don’t have it.
+	// FIXME: The following fields need locking, and don't have it.
 	additionalUIDs *idSet // Set by getAvailableIDs()
 	additionalGIDs *idSet // Set by getAvailableIDs()
 }
@@ -904,6 +906,7 @@ func GetStore(options types.StoreOptions) (Store, error) {
 		autoNsMaxSize:       autoNsMaxSize,
 		disableVolatile:     options.DisableVolatile,
 		transientStore:      options.TransientStore,
+		digestType:          options.DigestType,
 
 		additionalUIDs: nil,
 		additionalGIDs: nil,
@@ -1075,7 +1078,7 @@ func (s *store) startUsingGraphDriver() error {
 		}
 		// Our concurrency design requires s.graphDriverName not to be modified after
 		// store is constructed.
-		// It’s fine for driver.String() not to match the requested graph driver name
+		// It's fine for driver.String() not to match the requested graph driver name
 		// (e.g. if the user asks for overlay2 and gets overlay), but it must be an idempotent
 		// mapping:
 		//	driver1 := drivers.New(userInput, config)
@@ -1508,7 +1511,7 @@ func (s *store) putLayer(rlstore rwLayerStore, rlstores []roLayerStore, id, pare
 			gidMap = ilayer.GIDMap
 		}
 	} else {
-		// FIXME? It’s unclear why we are holding containerStore locked here at all
+		// FIXME? It's unclear why we are holding containerStore locked here at all
 		// (and because we are not modifying it, why it is a write lock, not a read lock).
 		if err := s.containerStore.startWriting(); err != nil {
 			return nil, -1, err
@@ -3690,7 +3693,7 @@ func (s *store) Shutdown(force bool) ([]string, error) {
 		err = fmt.Errorf("a layer is mounted: %w", ErrLayerUsedByContainer)
 	}
 	if err == nil {
-		// We don’t retain the lastWrite value, and treat this update as if someone else did the .Cleanup(),
+		// We don't retain the lastWrite value, and treat this update as if someone else did the .Cleanup(),
 		// so that we reload after a .Shutdown() the same way other processes would.
 		// Shutdown() is basically an error path, so reliability is more important than performance.
 		if _, err2 := s.graphLock.RecordWrite(); err2 != nil {
@@ -3741,7 +3744,7 @@ func copySlicePreferringNil[S ~[]E, E any](s S) S {
 // copyMapPreferringNil returns a shallow clone of map m.
 // If m is empty, a nil is returned.
 //
-// (As of, e.g., Go 1.23, maps.Clone preserves nil, but that’s not a documented promise;
+// (As of, e.g., Go 1.23, maps.Clone preserves nil, but that's not a documented promise;
 // and this function turns even non-nil empty maps into nil.)
 func copyMapPreferringNil[K comparable, V any](m map[K]V) map[K]V {
 	if len(m) == 0 {
@@ -3955,4 +3958,14 @@ func (s *store) Dedup(req DedupArgs) (drivers.DedupResult, error) {
 		}
 		return rlstore.dedup(r)
 	})
+}
+
+// GetDigestType returns the configured digest type for the store
+func (s *store) GetDigestType() string {
+	s.graphLock.Lock()
+	defer s.graphLock.Unlock()
+	if s.digestType == "" {
+		return "sha256"
+	}
+	return s.digestType
 }
