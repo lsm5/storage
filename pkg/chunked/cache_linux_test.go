@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	graphdriver "github.com/containers/storage/drivers"
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -144,7 +145,7 @@ func TestWriteCache(t *testing.T) {
 	dest := bigDataToBuffer{
 		buf: bytes.NewBuffer(nil),
 	}
-	cache, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", &dest)
+	cache, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", &dest, digest.SHA256)
 	if err != nil {
 		t.Errorf("got error from writeCache: %v", err)
 	}
@@ -155,11 +156,11 @@ func TestWriteCache(t *testing.T) {
 	for _, r := range toc {
 		if r.Digest != "" {
 			// find the element in the cache by the digest checksum
-			digest, off, lenTag := findTag(r.Digest, cache)
-			if digest == "" {
+			digestStr, off, lenTag := findTag(r.Digest, cache)
+			if digestStr == "" {
 				t.Error("file tag not found")
 			}
-			if digest != r.Digest {
+			if digestStr != r.Digest {
 				t.Error("wrong file found")
 			}
 			location := cache.vdata[off : off+lenTag]
@@ -167,19 +168,19 @@ func TestWriteCache(t *testing.T) {
 			assert.NoError(t, err)
 
 			assert.Equal(t, fileSize, uint64(r.Size))
-			assert.Equal(t, offFile, uint64(0))
+			assert.Equal(t, offFile, uint64(r.Offset))
 
-			fingerprint, err := calculateHardLinkFingerprint(r)
+			fingerprint, err := calculateHardLinkFingerprint(r, digest.SHA256)
 			if err != nil {
 				t.Errorf("got error from writeCache: %v", err)
 			}
 
 			// find the element in the cache by the hardlink fingerprint
-			digest, off, lenTag = findTag(fingerprint, cache)
-			if digest == "" {
+			digestStr, off, lenTag = findTag(fingerprint, cache)
+			if digestStr == "" {
 				t.Error("file tag not found")
 			}
-			if digest != fingerprint {
+			if digestStr != fingerprint {
 				t.Error("wrong file found")
 			}
 			location = cache.vdata[off : off+lenTag]
@@ -187,15 +188,15 @@ func TestWriteCache(t *testing.T) {
 			assert.NoError(t, err)
 
 			assert.Equal(t, fileSize, uint64(r.Size))
-			assert.Equal(t, offFile, uint64(0))
+			assert.Equal(t, offFile, uint64(r.Offset))
 		}
 		if r.ChunkDigest != "" {
 			// find the element in the cache by the chunk digest checksum
-			digest, off, len := findTag(r.ChunkDigest, cache)
-			if digest == "" {
+			digestStr, off, len := findTag(r.ChunkDigest, cache)
+			if digestStr == "" {
 				t.Error("chunk tag not found")
 			}
-			if digest != r.ChunkDigest {
+			if digestStr != r.ChunkDigest {
 				t.Error("wrong digest found")
 			}
 			expectedLocation := generateFileLocation(0, uint64(r.ChunkOffset), uint64(r.ChunkSize))
@@ -211,7 +212,7 @@ func TestReadCache(t *testing.T) {
 	dest := bigDataToBuffer{
 		buf: bytes.NewBuffer(nil),
 	}
-	cache, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", &dest)
+	cache, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", &dest, digest.SHA256)
 	if err != nil {
 		t.Errorf("got error from writeCache: %v", err)
 	}
@@ -229,7 +230,7 @@ func FuzzReadCache(f *testing.F) {
 	dest := &bigDataToBuffer{
 		buf: bytes.NewBuffer(nil),
 	}
-	_, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", dest)
+	_, err := writeCache([]byte(jsonTOC), graphdriver.DifferOutputFormatDir, "foobar", dest, digest.SHA256)
 	if err != nil {
 		f.Errorf("got error from writeCache: %v", err)
 	}
